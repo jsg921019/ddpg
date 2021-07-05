@@ -17,7 +17,7 @@ from model.ExperienceReplay import ReplayBuffer
 seed=0
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-obs_dim = 7
+obs_dim = 8
 act_dim = 1
 act_limit = 1 # np.radians(30)
 
@@ -58,7 +58,6 @@ for param in target_network.parameters():
     network_size += np.prod(param.shape)
     param.requires_grad = False
 
-
 def compute_loss_q(batch):
     state, action, reward, next_state, done = [field.to(device) for field in batch]
     q = network.q(state, action)
@@ -74,7 +73,6 @@ def compute_loss_pi(batch):
     state = batch[0]
     state = state.to(device)
     action = network.pi(state)
-    print(action)
     q_pi = network.q(state, action)
     return -q_pi.mean()
 

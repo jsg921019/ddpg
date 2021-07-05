@@ -9,14 +9,14 @@ from model.ActorCritic import ActorCritic
 
 # set hyper parameters equal to when trained
 device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-obs_dim = 7
+obs_dim = 8
 act_dim = 1
 act_limit = 1 # np.radians(30)
 
 env = Programmers_v2('env/map.png')
 env.xycar.speed = 50
 network = ActorCritic(obs_dim, act_dim, act_limit).to(device)
-network.load_state_dict(torch.load('weight_0011.pth'))
+network.load_state_dict(torch.load('weight_0006.pth'))
 
 state, done, ep_ret, ep_len = env.reset(0), False, 0, 0
 while 1:

@@ -5,6 +5,8 @@ import cv2
 import numpy as np
 from copy import deepcopy
 
+from torch import float32
+
 def get_pixels_line(p1, p2):
     '''
     두 좌표 p1와 p2 사이 모든 좌표를 반환 
@@ -93,7 +95,7 @@ class Xycar(object):
         self.sensor_position = np.array([[46, 0] for _ in range(self.sensor_n)])#np.array([[20, -self.width/2 - 1], [45, -self.width/4], [45, -self.width/4], [46, 0], [45, self.width/4], [45, self.width/4], [20, self.width/2 + 1]])
         self.sensor_angle = np.radians(np.linspace(-90, 90, self.sensor_n))
  
-    def step(self, steer, speed, dt):
+    def step(self, steer, dt):
         steer *= self.max_steer_angle
         speed = 50.0
         steer = np.clip(steer, -self.max_steer_angle, self.max_steer_angle)
@@ -135,7 +137,7 @@ class Reward(object):
         self.tiles = deepcopy(self.full_tiles[:-idx if idx else None])
         self.target_tile = self.tiles.pop()
 
-    def get_reward(self, x, y, done, sensors, speed):
+    def get_reward(self, x, y, done, sensors):
 
         if done:
             return -3.0, False
@@ -143,8 +145,8 @@ class Reward(object):
         i1, i2, j1, j2 = self.target_tile
         min_dist = np.min(sensors)
         reward = 0
-        if min_dist <= 25.0 / 300.0 and speed <= 0:
-            reward -= 0.01
+        # if min_dist <= 25.0 / 300.0 and speed <= 0:
+        #     reward -= 0.01
         if i1 <= y < i2 and j1 <= x < j2:
             if len(self.tiles) != 0:
                 self.target_tile = self.tiles.pop()
@@ -163,7 +165,9 @@ class Programmers_v2(object):
         self.dt = 0.1
 
     def get_state(self, frame=None):
-        return self.measure_distance(frame=frame, max_dist=None)
+        measurement = self.measure_distance(frame=frame, max_dist=None)
+        measurement.append(self.xycar.yaw)
+        return np.array(measurement, dtype=np.float32)
 
     def reset(self, position=None):
         (x, y, yaw), idx = self.map.get_initial_pose(position)
@@ -172,8 +176,8 @@ class Programmers_v2(object):
         return self.get_state()
 
     def step(self, action, frame= None):
-        steer, self.speed = action 
-        self.xycar.step(steer, self.speed, self.dt)
+        steer = action [0]
+        self.xycar.step(steer, self.dt)
         x, y, _ = self.xycar.get_pose()
         done = self.check_collision()
         sensors = self.measure_distance()
@@ -229,7 +233,7 @@ class Programmers_v2(object):
                     frame[y, x] = (0, 255, 0)
                 measurement.append(max_dist)
 
-        return np.array(measurement, dtype=np.float32) / 300.0
+        return [m/300.0 for m in measurement]  #np.array(measurement, dtype=np.float32) / 300.0
 
     def draw(self, frame):
         rect = self.xycar.get_box()
