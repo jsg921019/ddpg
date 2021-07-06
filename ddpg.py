@@ -1,183 +1,161 @@
 #! /usr/bin/env python
 # -*- coding:utf-8 -*-
+"""
+https://github.com/openai/spinningup/tree/master/spinup/algos/pytorch/ddpg 에서 변형
+
+Hyper parameters:
+
+    obs_dim (int): observation의 dimension.
+    act_dim (int): action의 dimension.
+    act_limit (float): action의 범위를 -act_limit ~ act_limit로 설정.
+        모든 act_dim에 대해 act_limit은 동일하다고 가정한다.
+
+    pi_lr (float): actor network의 learning rate.
+    q_lr (float): critic network의 learning rate.
+
+    act_noise (float): action에 얼마나 큰 noise를 더해줄 것인지. 훈련시 탐색 범위를 넓히기 위해 사용한다.
+
+    gamma (float): q 함수에서 미래 보상에 대한 감쇠율. 0 <= gamma < 1.
+        Q(s, a) = reward + gamma * (1 - done) * Q(s', a').
+    polyak (float): soft target update 비율. 0 <= polyak < 1.
+        W_target =  polyak * W_target + (1 - polyak) * W_original.
+
+    epochs (int): 몇 epoch을 훈련시킬 것인지.
+        일정한 step수로 이루어져있으며, epoch 종료시 weight 저장 및 훈련 경과를 보여준다.
+    steps_per_epoch (int): 한 epoch를 몇 개의 step으로 할건지. 
+    num_test_episodes (int): 테스트시 몇 에피소드를 돌릴 것인지.
+    max_ep_len (int): 에피소드의 최대 step. 넘을 경우 자동으로 episode가 끝난다.
+    start_steps (int): 무작위 action을 취하는 step 수.
+
+    update_after (int): 몇 스텝 후 훈련을 시작할 것인지.
+    update_every (int): 몇 스텝마다 훈련을 할 것인지.
+        10으로 설정하면 10 step마다 10번씩 update를 한다.
+
+    batch_size (int): 배치 사이즈.
+    replay_size (int): Experience Replay 메모리 크기.
+
+    save_freq (int): weight 저장 주기.
+
+"""
 
 # import stuffs
-
-from copy import deepcopy
 import numpy as np
 import torch
-import torch.nn as nn
-from torch.optim import Adam
 from env.env import Programmers_v2
 from model.ActorCritic import ActorCritic
 from model.ExperienceReplay import ReplayBuffer
 
+# For reproducibility
+seed = 0
+if seed is not None:
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    np.random.seed(seed)
+
 # hyper parameters
-
-seed=0
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
 obs_dim = 8
 act_dim = 1
-act_limit = 1 # np.radians(30)
+act_limit = 1
 
-steps_per_epoch = 2000
-epochs = 100
-replay_size = 100000
-gamma = 0.99
-polyak = 0.99
 pi_lr = 0.0001
 q_lr = 0.0001
-batch_size = 128
-start_steps = 0
-update_after = 1000
-update_every = 100
+
 act_noise = 0.1
+
+gamma = 0.99
+polyak = 0.99
+
+epochs = 100
+steps_per_epoch = 2000
 num_test_episodes = 1
 max_ep_len = 2000
+start_steps = 0
+
+batch_size = 128
+replay_size = 100000
+
+update_after = 1000
+update_every = 100
+
 save_freq=1
-loss_fn = nn.MSELoss()
-weight_path = None # 'weight_0100.pth'
-
-# for reproducibility
-torch.manual_seed(seed)
-torch.cuda.manual_seed(seed)
-np.random.seed(seed)
-
-# setup
-env, test_env = Programmers_v2('env/map.png'), Programmers_v2('env/map.png')
-replay_buffer = ReplayBuffer(obs_dim, act_dim, replay_size)
-network = ActorCritic(obs_dim, act_dim, act_limit).to(device)
-if weight_path is not None:
-    network.load_state_dict(torch.load(weight_path))
-pi_optimizer = Adam(network.pi.parameters(), lr=pi_lr)
-q_optimizer = Adam(network.q.parameters(), lr=q_lr)
-target_network = deepcopy(network)
-network_size = 0
-for param in target_network.parameters():
-    network_size += np.prod(param.shape)
-    param.requires_grad = False
-
-def compute_loss_q(batch):
-    state, action, reward, next_state, done = [field.to(device) for field in batch]
-    q = network.q(state, action)
-    with torch.no_grad():
-        next_action = target_network.pi(next_state)
-        next_q = target_network.q(next_state, next_action)
-        target_q = reward + gamma * (1 - done) * next_q
-    loss_q = loss_fn(q, target_q)
-
-    return loss_q
-
-def compute_loss_pi(batch):
-    state = batch[0]
-    state = state.to(device)
-    action = network.pi(state)
-    q_pi = network.q(state, action)
-    return -q_pi.mean()
-
-# Set up model saving
-# logger.setup_pytorch_saver(ac)
-
-def update(batch):
-
-    # update q
-    q_optimizer.zero_grad()
-    loss_q = compute_loss_q(batch)
-    loss_q.backward()
-    q_optimizer.step()
-
-    # freeze q
-    for param in network.q.parameters():
-        param.requires_grad = False
-
-    # update pi
-    pi_optimizer.zero_grad()
-    loss_pi = compute_loss_pi(batch)
-    loss_pi.backward()
-    pi_optimizer.step()
-
-    # unfreeze q
-    for param in network.q.parameters():
-        param.requires_grad = True
-
-    # update target network
-    with torch.no_grad():
-        for param, param_target in zip(network.parameters(), target_network.parameters()):
-            param_target.data.mul_(polyak)
-            param_target.data.add_((1 - polyak) * param.data)
-
-    return loss_q, loss_pi
-
-def get_action(state, noise_scale):
-    state = torch.from_numpy(state).to(device)
-    action = network.get_action(state)
-    action += noise_scale * np.random.randn(act_dim)
-    return np.clip(action, -act_limit, act_limit)
 
 def test_agent():
+    """
+    Test Environment에서 학습된 agent의 성능 확인.
 
+    Note:
+        Test시 noise는 0으로 설정한다.
+    """
     for _ in xrange(num_test_episodes):
-        state, done, ep_ret, ep_len = test_env.reset(0), False, 0, 0
+        obs, done, ep_rew, ep_len = test_env.reset(0), False, 0, 0
 
         while not (done or (ep_len == max_ep_len)):
-            # Take deterministic actions at test time (noise_scale=0)
-            action = get_action(state, 0)
-            state, reward, done = test_env.step(action)
- 
-            ep_ret += reward
+            obs = torch.from_numpy(obs).to(device)
+            action = agent.get_action(obs, 0)
+            obs, reward, done, _ = test_env.step(action)
+            ep_rew += reward
             ep_len += 1
 
-        print('test result : epoch=%d  steps=%d  rewards=%f'%(epoch, ep_len, ep_ret))
-    print('---')
+        print('  Test result: steps=%d  rewards=%f'%(ep_len, ep_rew))
+    print
 
+# main
+if __name__ == "__main__":
 
-# main loop
+    # Acceleration with gpu if possible
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-print('\nNumber of parameters: \t %d\n'%network_size)
+    env, test_env = Programmers_v2(), Programmers_v2()
+    memory = ReplayBuffer(obs_dim, act_dim, replay_size)
+    agent = ActorCritic(obs_dim, act_dim, act_limit, pi_lr, q_lr, gamma, polyak).to(device)
 
-total_steps = steps_per_epoch * epochs
-state, ep_ret, ep_len = env.reset(), 0, 0
-loss_ql, loss_pil = [], []
+    obs, ep_rew, ep_len = env.reset(), 0, 0
+    loss_q_log, loss_pi_log, ep_rew_log, ep_len_log = [], [], [], []
 
-for t in xrange(total_steps):
-    
-    if t > start_steps:
-        action = get_action(state, act_noise)
-    else:
-        action = np.random.rand(act_dim)*2.0 - 2.0
+    for t in xrange(1, epochs * steps_per_epoch + 1):
+        
+        # start_steps 동안은 무작위 행동을 취하여 공격적으로 탐색을 한다.
+        if t <= start_steps:
+            action = 2 * act_limit * (np.random.rand(act_dim) - 0.5)
+        # 그 이후는 agent의 action에 따른다.
+        else:
+            action = agent.get_action(torch.from_numpy(obs).to(device), act_noise)
 
-    # Step the env
-    next_state, reward, done = env.step(action)
+        # Env step
+        next_obs, reward, done, _ = env.step(action)
 
-    ep_ret += reward
-    ep_len += 1
+        # store experience
+        memory.store(obs, action, reward, next_obs, done)
 
-    replay_buffer.store(state, action, reward, next_state, done)
+        obs = next_obs
+        ep_rew += reward
+        ep_len += 1
 
-    state = next_state
+        # End of episode
+        if done or (ep_len == max_ep_len):
+            ep_rew_log.append(ep_rew)
+            ep_len_log.append(ep_len)
+            obs, ep_rew, ep_len = env.reset(), 0, 0
 
-    # End of episode handling
-    if done or (ep_len == max_ep_len):
-        state, ep_ret, ep_len = env.reset(), 0, 0
+        # Optimize
+        if t % update_every == 0 and memory.size >= update_after:
+            for _ in range(update_every):
+                batch = [tensor.to(device) for tensor in memory.sample_batch(batch_size)]
+                loss_q, loss_pi = agent.update(batch)
+                loss_q_log.append(loss_q)
+                loss_pi_log.append(loss_pi)
 
-    # Update handling
-    if replay_buffer.size >= update_after and t % update_every == 0:
-        for _ in range(update_every):
-            batch = replay_buffer.sample_batch(batch_size)
-            loss_q, loss_pi = update(batch)
-            loss_ql.append(loss_q.item())
-            loss_pil.append(loss_pi.item())
+        # End of Epoch
+        if t % steps_per_epoch == 0:
+            epoch = t // steps_per_epoch
+            print('<Epoch {}>'.format(epoch))
+            print('  Train result: loss_q={:.4f}  loss_pi={:.4f}  rewards={:.3f}  steps={}'.format(
+                     np.mean(loss_q_log), np.mean(loss_pi_log), np.mean(ep_rew_log), int(np.mean(ep_len_log))))
+            loss_q_log, loss_pi_log, ep_rew_log, ep_len_log = [], [], [], []
 
-    # End of epoch handling
-    if (t+1) % steps_per_epoch == 0:
-        epoch = (t+1) // steps_per_epoch
-        print('train result : epoch=%d  loss_q=%f  loss_pi=%f'%(epoch, np.mean(loss_ql), np.mean(loss_pil)))
-        loss_ql, loss_pil = [], []
+            # Save model
+            if (epoch % save_freq == 0) or (epoch == epochs):
+                torch.save(agent.pi.state_dict(), 'weight_{:0>4}.pth'.format(epoch))
 
-        # Save model
-        if (epoch % save_freq == 0) or (epoch == epochs):
-            torch.save(network.state_dict(), 'weight_{:0>4}.pth'.format(epoch)) #logger.save_state({'env': env}, None)
-
-        # Test model
-        test_agent()
+            # Test model
+            test_agent()

@@ -308,8 +308,12 @@ class Reward(object):
 
         i1, i2, j1, j2 = self.target_tile
 
-        if i1 <= y < i2 and j1 <= x < j2: 
-            return 1.0 # target_tile 영역 안에 진입하면,
+        if i1 <= y < i2 and j1 <= x < j2:
+            if self.tiles:
+                self.target_tile = self.tiles.pop()
+            else:
+                self.target_tile = [0, 0, 0, 0]
+            return 3.0 # target_tile 영역 안에 진입하면,
         else:
             return -0.01 # 그 이외의 경우
 
@@ -395,7 +399,7 @@ class Programmers_v2(object):
             dict: gym API랑 맞추기 위해 넣은 것이므로 쓸 일은 없다.
 
         """
-        steer, speed = action[0], 50,0 # 등속 운동으로 가정
+        steer, speed = action[0], 50.0 # 등속 운동으로 가정
         self.xycar.step(steer, speed, self.dt)
         x, y, _ = self.xycar.get_pose()
         done = self.check_collision()
@@ -421,7 +425,7 @@ class Programmers_v2(object):
 
         """
 
-        frame = env.map.img.copy()
+        frame = self.map.img.copy()
 
         # draw box
         box = self.xycar.get_box()
@@ -445,7 +449,7 @@ class Programmers_v2(object):
         # render
         cv2.imshow('programmers', frame)
         if t is None:
-            t = int(1.0 / self.dt)
+            t = int(1000 *self.dt)
         if cv2.waitKey(t) == ord(' '):
             self.close()
             exit()
@@ -552,4 +556,4 @@ if __name__ == "__main__" :
     for i in range(len(env.map.init_positions)):
         obs = env.reset(position=i)
         print(obs)
-        env.render(draw_hitbox=True, draw_sensors=True, draw_target_tile=True, t=2000)
+        env.render(draw_hitbox=True, draw_sensors=True, draw_target_tile=True, t=1000)
