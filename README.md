@@ -23,8 +23,8 @@
 - 센서 개수, 속도, observation features, reward 등 초기 설정값들은 docstring을 참조.
   
 ### 4. 목표
-- Actor와 Critic network 작성
-- hyper parameter 튜닝
+- Actor와 Critic network 작성 (./model/ActorCritic.py)
+- hyper parameter 튜닝 (./ddpg.py)
 - 기타 Reward / observation features / noise 방식 혹은 다른 기법들을 사용하여 성능 향상시키기
 
 ### 5. 제출 형식

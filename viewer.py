@@ -20,9 +20,9 @@ act_limit = 1
 
 env = Programmers_v2()
 actor = Actor(obs_dim, act_dim, act_limit).to(device)
-actor.load_state_dict(torch.load('weight_sample.pth'))
+actor.load_state_dict(torch.load('weight_sample.pth', map_location=device))
 
-state, done, ep_ret, ep_len = env.reset(5), False, 0, 0
+state, done, ep_ret, ep_len = env.reset(0), False, 0, 0
 env.render(draw_target_tile=True)
 
 while not done:
@@ -31,7 +31,7 @@ while not done:
         action = actor(state)
     action = action.cpu().numpy()
     state, reward, done, _ = env.step(action)
-    env.render(draw_sensors=True, draw_target_tile=True)
+    env.render(draw_sensors=True, draw_target_tile=False)
     ep_ret += reward
     ep_len += 1
 
